@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient, publicFileUrl, storagePathFromPublicUrl } from '@/lib/supabase';
 import { getSessionEmail, denyIfBanned, isAccountApproved } from '@/lib/auth';
-import type { Profile } from '@/lib/types';
+import { toSafeProfile } from '@/lib/types';
 import { err, serverError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -71,7 +71,7 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ ok: true, avatar_url: avatarUrl, account: data as Profile });
+    return NextResponse.json({ ok: true, avatar_url: avatarUrl, account: toSafeProfile(data as Record<string, unknown> | null) });
   } catch (e) {
     if (e instanceof Error && e.message.startsWith('Missing environment variable')) {
       return err('Server ki setting mukammal nahi. Owner se rabta karen.', 500);

@@ -10,7 +10,7 @@ import {
   isOwnerEmail,
   setSessionCookie,
 } from '@/lib/auth';
-import { PURPOSES, type Profile, type Purpose } from '@/lib/types';
+import { PURPOSES, toSafeProfile, type Purpose } from '@/lib/types';
 import { err, serverError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
         const res = NextResponse.json({
           ok: true,
           status: 'pending',
-          account: (account as Profile | null) ?? null,
+          account: toSafeProfile(account as Record<string, unknown> | null),
         });
         clearVerifyCookie(res);
         return res;
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
       const res = NextResponse.json({
         ok: true,
         status: 'approved',
-        account: (account as Profile | null) ?? null,
+        account: toSafeProfile(account as Record<string, unknown> | null),
       });
       setSessionCookie(res, token);
       clearVerifyCookie(res);
@@ -138,7 +138,7 @@ export async function POST(req: Request) {
       const res = NextResponse.json({
         ok: true,
         status: 'pending',
-        account: data as Profile,
+        account: toSafeProfile(data as Record<string, unknown> | null),
       });
       clearVerifyCookie(res);
       return res;
@@ -148,7 +148,7 @@ export async function POST(req: Request) {
     const res = NextResponse.json({
       ok: true,
       status: 'approved',
-      account: data as Profile,
+      account: toSafeProfile(data as Record<string, unknown> | null),
     });
     setSessionCookie(res, token);
     clearVerifyCookie(res);

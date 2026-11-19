@@ -24,11 +24,33 @@ export type Account = {
   /** Ban (migration 0003): kab ban hua + kab tak (null = permanent ban). */
   banned_at: string | null;
   ban_until: string | null;
+  /** Username/password login (migration 0004). */
+  username: string | null;
+  has_password: boolean;
 };
 
 export type MeResponse = {
   account: Account | null;
   bannedEmail: string | null;
+};
+
+/** Ban appeal ki haalat — GET /api/auth/appeal-status ka jawab. */
+export type AppealInfo = {
+  id: string;
+  status: string;
+  message: string;
+  created_at: string;
+  decided_at: string | null;
+  decided_note: string | null;
+};
+
+export type AppealStatusResponse = {
+  banned: {
+    ban_until: string | null;
+    review_note: string | null;
+    banned_at: string | null;
+  } | null;
+  appeal: AppealInfo | null;
 };
 
 /** POST /api/auth/complete-profile ka jawab: status batata hai account chala ya review mein gaya. */

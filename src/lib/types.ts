@@ -37,6 +37,55 @@ export interface Profile {
   /** Ban (migration 0003): kab ban hua + kab tak (null = permanent ban). */
   banned_at: string | null;
   ban_until: string | null;
+  /** Username/password login (migration 0004): username lowercase store hota hai. */
+  username: string | null;
+  /**
+   * Password ke liye client ko sirf ye pata hota hai ke password set hai ya
+   * nahi — hash kabhi client ko nahi bheja jata (toSafeProfile use karen).
+   */
+  has_password: boolean;
+}
+
+/**
+ * DB row se client-safe profile: password_hash (aur koi bhi future
+ * sensitive column) yahan drop ho jata hai. Jo route bhi profile client ko
+ * bhejta hai, use hamesha is se guzarna chahiye.
+ */
+export function toSafeProfile(
+  row: Record<string, unknown> | null | undefined,
+): Profile | null {
+  if (!row || typeof row !== 'object') return null;
+  return {
+    id: String(row.id ?? ''),
+    email: String(row.email ?? ''),
+    name: (row.name as string | null) ?? null,
+    place: (row.place as string | null) ?? null,
+    purpose: (row.purpose as Purpose | null) ?? null,
+    language: (row.language as string | null) ?? null,
+    avatar_url: (row.avatar_url as string | null) ?? null,
+    created_at: String(row.created_at ?? ''),
+    retired_at: (row.retired_at as string | null) ?? null,
+    status: (row.status as AccountStatus) ?? 'pending',
+    review_note: (row.review_note as string | null) ?? null,
+    reviewed_at: (row.reviewed_at as string | null) ?? null,
+    banned_at: (row.banned_at as string | null) ?? null,
+    ban_until: (row.ban_until as string | null) ?? null,
+    username: (row.username as string | null) ?? null,
+    has_password: Boolean(row.password_hash),
+  };
+}
+
+/** Ban ki appeal (migration 0004, `appeals` table). */
+export type AppealStatus = 'pending' | 'approved' | 'rejected';
+
+export interface Appeal {
+  id: string;
+  email: string;
+  message: string;
+  status: AppealStatus;
+  created_at: string;
+  decided_at: string | null;
+  decided_note: string | null;
 }
 
 export interface AppRow {
@@ -86,6 +135,20 @@ export function isValidEmail(email: string): boolean {
   // Pragmatic check: one @, non-empty local + domain with a dot. Good enough
   // for a verification-code flow (the code itself proves ownership).
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email);
+}
+
+/** Username: 3-20 chars, sirf letters/numbers/underscore. */
+export function isValidUsername(username: string): boolean {
+  return /^[a-zA-Z0-9_]{3,20}$/.test(username);
+}
+
+/**
+ * Username hamesha lowercase store/likha jata hai — is se login lookup
+ * exact match hoti hai aur `lower(username)` unique index ke saath do
+ * spellings kabhi nahi banti. Pehle isValidUsername se check karen.
+ */
+export function normalizeUsername(username: string): string {
+  return username.trim().toLowerCase();
 }
 
 /** Lowercase + trim so the same address can never register twice with different casing. */

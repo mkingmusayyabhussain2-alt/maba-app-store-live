@@ -51,8 +51,21 @@ export async function POST(req: Request) {
       return err('Aap ka account reject kar diya gaya hai. Dobara account nahi ban sakta.', 403);
     }
     // Ban hai to code nahi — muddat khatam ho gayi ho to ban khud utar jata hai.
+    // `banned: true` ke saath muddat + wajah bhi bhejte hain taake UI ban
+    // notice + appeal form dikha sake.
     const banMsg = await denyIfBanned(email);
-    if (banMsg) return err(banMsg, 403);
+    if (banMsg) {
+      return NextResponse.json(
+        {
+          error: banMsg,
+          banned: true,
+          ban_until: review?.ban_until ?? null,
+          review_note: review?.review_note ?? null,
+          email,
+        },
+        { status: 403 },
+      );
+    }
 
     await deleteExpiredCodes(db, email);
     const recent = await countRecentCodes(db, email);

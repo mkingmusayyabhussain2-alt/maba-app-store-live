@@ -17,7 +17,9 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import bcrypt from 'bcryptjs';
 import { getServiceClient } from './supabase';
+import { normalizeEmail, normalizeUsername } from './types';
 import type { AccountStatus, AppRow } from './types';
 
 export const SESSION_COOKIE = 'maba_session';
@@ -322,4 +324,76 @@ export async function isAccountApproved(email: string): Promise<boolean> {
 export function isOwnerEmail(email: string | null | undefined): boolean {
   const owner = (process.env.OWNER_EMAIL || '').trim().toLowerCase();
   return Boolean(email && owner && email.trim().toLowerCase() === owner);
+}
+
+// ------------------------------------------------------- username/password
+// Passwords are hashed server-side ONLY with bcryptjs (pure JS, no native
+// build). Plaintext passwords are never stored, never logged, and the hash
+// is never returned to the client (toSafeProfile strips it).
+
+const PASSWORD_HASH_ROUNDS = 10;
+
+export async function hashPassword(password: string): Promise<string> {
+  return bcrypt.hash(password, PASSWORD_HASH_ROUNDS);
+}
+
+/** Wrong hash / corrupt value par false — kabhi throw nahi karta. */
+export async function verifyPassword(
+  password: string,
+  hash: string,
+): Promise<boolean> {
+  try {
+    return await bcrypt.compare(password, hash);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Password-login ke liye profile — password_hash SIRF server par compare
+ * ke liye use hota hai, is type ko kabhi response mein nahi bhejna.
+ */
+export interface PasswordLoginProfile {
+  email: string;
+  username: string | null;
+  password_hash: string | null;
+  status: AccountStatus;
+  retired_at: string | null;
+  banned_at: string | null;
+  ban_until: string | null;
+  review_note: string | null;
+}
+
+const PASSWORD_LOGIN_COLUMNS =
+  'email, username, password_hash, status, retired_at, banned_at, ban_until, review_note';
+
+/**
+ * Username ya email se profile dhoondho. Username lowercase store hota
+ * hai, is liye lookup exact match hai (case-insensitive, wildcard-safe).
+ */
+export async function getProfileByLogin(
+  login: string,
+): Promise<PasswordLoginProfile | null> {
+  const db = getServiceClient();
+  if (login.includes('@')) {
+    const { data } = await db
+      .from('profiles')
+      .select(PASSWORD_LOGIN_COLUMNS)
+      .eq('email', normalizeEmail(login))
+      .maybeSingle();
+    return (data as PasswordLoginProfile | null) ?? null;
+  }
+  const { data } = await db
+    .from('profiles')
+    .select(PASSWORD_LOGIN_COLUMNS)
+    .eq('username', normalizeUsername(login))
+    .maybeSingle();
+  return (data as PasswordLoginProfile | null) ?? null;
+}
+
+/** Rate-limit key ke liye caller ka IP (Vercel ke peeche x-forwarded-for). */
+export function getClientIp(req: Request): string {
+  const forwarded = req.headers.get('x-forwarded-for');
+  const first = forwarded?.split(',')[0]?.trim();
+  return first || req.headers.get('x-real-ip') || 'unknown';
 }
