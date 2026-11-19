@@ -27,6 +27,7 @@ backend, and **Gmail SMTP (nodemailer)** for verification emails.
 - **App detail + download** — download counter barhta hai, phir APK Supabase Storage se signed URL par redirect hoti hai (APK bucket private hai).
 - **Account (email code se)** — email par 6-digit code, phir profile (naam, jagah, purpose, language). **Ek email, ek account, hamesha ke liye.**
 - **Account review** — naya account banate hi `pending` mein jata hai aur owner ki approval ka wait karta hai (review website ya `/admin` se). **Pending account ko session nahi milta**: login, app release aur photo upload band rehte hain jab tak owner approve na kare (1 din ke andar). Reject hone par us email ko dobara code nahi milta. Purane accounts (migration 0002 se pehle ke) sab `approved` hain. Owner email (`OWNER_EMAIL`) ko review ki zaroorat nahi — hamesha approved. Wapas login: approved account dobara code se login kar sakta hai (request-code → verify-code → complete-profile session deta hai).
+- **Account ban** — owner review website se kisi bhi account ko ban kar sakta hai: **1 ghanta, 6 ghante, 24 ghante, 7 din, 30 din, apni muddat (ghante/din), ya permanent**. Ban hote hi account ka session khatam, login/code/release/photo/profile-update sab band, aur us ki apps public store se gayab ho jati hain (detail aur download bhi 404). **Muddat khatam hote hi ban khud-bakhud utar jata hai** — account dobara `approved` ho jata hai aur us ki apps wapas aa jati hain; owner kisi bhi waqt **Unblock** bhi kar sakta hai. Ban ki wajah `review_note` mein save hoti hai (migration 0003).
 - **Permanent Log Out** — account hamesha ke liye band: email `burned_emails` mein jati hai, profile retired mark hoti hai (row rakhi jati hai taake dobara register na ho sake), sessions khatam.
 - **Release flow** — login ke baad APK + icon upload, proof email/phone; app `pending` mein jati hai.
 - **Owner review** — sirf `OWNER_EMAIL` wali email `/api/admin/releases` dekh sakti hai aur approve/reject kar sakti hai. Approve hote hi app store mein public ho jati hai.
@@ -39,18 +40,18 @@ responses mein nahi aate.
 
 | Method + path | Auth | Kya karta hai |
 |---|---|---|
-| `GET /api/apps?search=&category=` | Public | Sirf `approved` apps, newest first. `{ apps: [...] }` (proof/submitter contact nahi hota) |
-| `GET /api/apps/[id]` | Public | Approved app ki detail. Pending/rejected par 404 |
-| `GET /api/apps/[id]/download` | Public | Sirf approved. Downloads +1, phir APK par 302 redirect (private bucket ke liye 1-hour signed URL) |
-| `POST /api/auth/request-code` `{email}` | — | 6-digit code email karta hai. Burned ya rejected email par 403; pending/approved account bhi code mangwa sakta hai (dobara login ke liye). 1 ghante mein 5 se zyada codes par 429. `{ ok: true }` |
+| `GET /api/apps?search=&category=` | Public | Sirf `approved` apps, newest first. `{ apps: [...] }` (proof/submitter contact nahi hota). Ban hue submitter ki apps chhupi hoti hain. |
+| `GET /api/apps/[id]` | Public | Approved app ki detail. Pending/rejected par 404 — ban hue submitter ki app par bhi 404 |
+| `GET /api/apps/[id]/download` | Public | Sirf approved. Downloads +1, phir APK par 302 redirect (private bucket ke liye 1-hour signed URL). Ban hue submitter ki app par 404 |
+| `POST /api/auth/request-code` `{email}` | — | 6-digit code email karta hai. Burned, rejected ya ACTIVELY banned email par 403 (ban ki muddat + wajah ke saath); khatam hua ban khud utar jata hai. Pending/approved account bhi code mangwa sakta hai (dobara login ke liye). 1 ghante mein 5 se zyada codes par 429. `{ ok: true }` |
 | `POST /api/auth/verify-code` `{email, code}` | — | Ghalat code par attempts +1, 400. 5 ghalat koshishon ke baad code lock — naya code chahiye. Sahi code par `maba_verify` cookie (15 min). `{ ok: true }` |
-| `POST /api/auth/complete-profile` `{name, place, purpose, language}` | Verify cookie | Naya account: profile `pending` banata hai, session NAHI deta — `{ ok: true, status: 'pending', account }`. Owner: `approved` + session. Dobara login (approved profile): session deta hai — `{ ok: true, status: 'approved', account }`. Pending profile dobara aaye to `{ status: 'pending' }`, session nahi. Rejected par 403. |
-| `GET /api/auth/me[?email=]` | Session (optional) | `{ account, bannedEmail }`. Account mein `status` aur `review_note` bhi hote hain. `?email=` sirf us email ka burned status check karta hai (logout screen ke liye) |
-| `POST /api/auth/update-profile` `{name, place, purpose, language}` | Session (approved only) | Profile update. Pending/rejected account par 403 ("account abhi review mein hai"). `{ ok: true, account }` |
-| `POST /api/auth/photo` (FormData `photo`) | Session (approved only) | Image (PNG/JPG/WEBP/GIF) `avatars` bucket mein, purani photo delete. Pending/rejected account par 403. `{ avatar_url }` |
-| `DELETE /api/auth/photo` | Session (approved only) | Photo + `avatar_url` clear. Pending/rejected account par 403. `{ ok: true }` |
+| `POST /api/auth/complete-profile` `{name, place, purpose, language}` | Verify cookie | Naya account: profile `pending` banata hai, session NAHI deta — `{ ok: true, status: 'pending', account }`. Owner: `approved` + session. Dobara login (approved profile): session deta hai — `{ ok: true, status: 'approved', account }`. Pending profile dobara aaye to `{ status: 'pending' }`, session nahi. Rejected par 403. Banned par 403 (ban ki muddat + wajah); khatam hua ban utar kar approved login ho jata hai. |
+| `GET /api/auth/me[?email=]` | Session (optional) | `{ account, bannedEmail }`. Account mein `status`, `review_note`, `banned_at` aur `ban_until` bhi hote hain. `?email=` sirf us email ka burned status check karta hai (logout screen ke liye) |
+| `POST /api/auth/update-profile` `{name, place, purpose, language}` | Session (approved only) | Profile update. Pending/rejected account par 403 ("account abhi review mein hai"); banned account par 403 (ban ki muddat + wajah). `{ ok: true, account }` |
+| `POST /api/auth/photo` (FormData `photo`) | Session (approved only) | Image (PNG/JPG/WEBP/GIF) `avatars` bucket mein, purani photo delete. Pending/rejected account par 403; banned par 403 (ban ki muddat + wajah). `{ avatar_url }` |
+| `DELETE /api/auth/photo` | Session (approved only) | Photo + `avatar_url` clear. Pending/rejected account par 403; banned par 403 (ban ki muddat + wajah). `{ ok: true }` |
 | `POST /api/auth/logout-permanent` `{email}` | Session + email match | Email hamesha ke liye burn, profile retired, sessions + codes delete, cookies clear. `{ ok: true, banned: true }` |
-| `POST /api/release` (FormData) | Session (approved only) | APK (required, `.apk`) + icon (optional image) upload, app `pending`. Pending/rejected account par 403. `{ ok: true, id, status: 'pending' }` |
+| `POST /api/release` (FormData) | Session (approved only) | APK (required, `.apk`) + icon (optional image) upload, app `pending`. Pending/rejected account par 403; banned par 403 (ban ki muddat + wajah). `{ ok: true, id, status: 'pending' }` |
 | `GET /api/admin/releases` | Owner only | Sab releases (pending/approved/rejected), newest first. `{ releases: [...] }` |
 | `POST /api/admin/releases/[id]/approve` | Owner only | Status `approved`. `{ ok: true, app }` |
 | `POST /api/admin/releases/[id]/reject` `{note?}` | Owner only | Status `rejected` (+ optional note). `{ ok: true, app }` |
@@ -69,9 +70,11 @@ Migration: `supabase/migrations/0001_init.sql` — re-runnable (IF NOT EXISTS / 
 
 Migration `0002_account_review.sql` — account review ke liye: `profiles` mein `status` (`pending`/`approved`/`rejected`, default `pending`), `review_note` aur `reviewed_at` add karta hai, aur migration chalte waqt jitne profiles hain un sab ko `approved` kar deta hai (wo review se pehle ke accounts hain). **Sirf ek dafa chalana hai** — dobara chalane se naye pending accounts bhi approve ho jayenge. Index: `profiles(status, created_at desc)`.
 
+Migration `0003_account_ban.sql` — account ban ke liye, **0002 ke baad chalana hai**: `profiles` mein `banned_at` aur `ban_until` (`timestamptz`, null = permanent ban) add karta hai aur `profiles_status_check` ko badal kar `status` mein `'banned'` bhi allow karta hai. Koi backfill nahi (koi banned account pehle se nahi hai). Column adds idempotent hain; constraint ki tabdeeli DO block mein defensive likhi hai, is liye dobara chalana safe hai.
+
 | Table | Main columns |
 |---|---|
-| `profiles` | id, email (unique), name, place, purpose (`download`/`upload`/`both`), language (default `Roman Urdu`), avatar_url, created_at, retired_at |
+| `profiles` | id, email (unique), name, place, purpose (`download`/`upload`/`both`), language (default `Roman Urdu`), avatar_url, created_at, retired_at, status (`pending`/`approved`/`rejected`/`banned`), review_note, reviewed_at, banned_at, ban_until |
 | `verification_codes` | id, email, code_hash (SHA-256, kabhi plaintext nahi), expires_at, attempts (default 0), created_at |
 | `burned_emails` | email (PK), burned_at, reason |
 | `apps` | id, name, developer, version, category, description, icon_url, apk_url, apk_size, downloads (default 0), status (`pending`/`approved`/`rejected`, default `pending`), submitter_email, proof_email, proof_phone, rejection_note, created_at |

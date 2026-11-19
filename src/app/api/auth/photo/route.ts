@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient, publicFileUrl, storagePathFromPublicUrl } from '@/lib/supabase';
-import { getSessionEmail, isAccountApproved } from '@/lib/auth';
+import { getSessionEmail, denyIfBanned, isAccountApproved } from '@/lib/auth';
 import type { Profile } from '@/lib/types';
 import { err, serverError } from '@/lib/http';
 
@@ -17,6 +17,8 @@ export async function POST(req: Request) {
   try {
     const email = await getSessionEmail();
     if (!email) return err('Login karen.', 401);
+    const banMsg = await denyIfBanned(email);
+    if (banMsg) return err(banMsg, 403);
     if (!(await isAccountApproved(email))) {
       return err('Aap ka account abhi review mein hai. Approve hone ke baad photo laga sakenge.', 403);
     }
@@ -83,6 +85,8 @@ export async function DELETE() {
   try {
     const email = await getSessionEmail();
     if (!email) return err('Login karen.', 401);
+    const photoBanMsg = await denyIfBanned(email);
+    if (photoBanMsg) return err(photoBanMsg, 403);
     if (!(await isAccountApproved(email))) {
       return err('Aap ka account abhi review mein hai.', 403);
     }

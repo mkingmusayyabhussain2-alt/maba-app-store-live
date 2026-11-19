@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { isSubmitterActivelyBanned } from '@/lib/auth';
 import { toPublicApp, type AppRow } from '@/lib/types';
 import { err, serverError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
 
-/** GET /api/apps/[id] — app detail. Only APPROVED apps are visible (404 otherwise). */
+/** GET /api/apps/[id] — app detail. Only APPROVED apps are visible (404 otherwise). A banned submitter's app is also hidden (404). */
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string }> },
@@ -21,7 +22,11 @@ export async function GET(
       .maybeSingle();
     if (error) throw error;
     if (!data) return err('App nahi mili.', 404);
-    return NextResponse.json({ app: toPublicApp(data as AppRow) });
+    const appRow = data as AppRow;
+    if (await isSubmitterActivelyBanned(appRow.submitter_email)) {
+      return err('App nahi mili.', 404);
+    }
+    return NextResponse.json({ app: toPublicApp(appRow) });
   } catch (e) {
     if (e instanceof Error && e.message.startsWith('Missing environment variable')) {
       return err('Server ki setting mukammal nahi. Owner se rabta karen.', 500);

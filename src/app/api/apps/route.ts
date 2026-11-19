@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
+import { excludeBannedSubmitters } from '@/lib/auth';
 import { toPublicApp, type AppRow } from '@/lib/types';
 import { err, serverError } from '@/lib/http';
 
@@ -10,6 +11,8 @@ export const dynamic = 'force-dynamic';
  * Public store listing — only APPROVED apps, newest first (the "Nayi apps"
  * list). The UI sorts by downloads client-side for "Sab se zyada download".
  * Proof/submitter contact details are never included in public responses.
+ * Apps whose submitter is ACTIVELY banned are hidden (unblocking brings
+ * them back automatically; an expired ban is lifted when this runs).
  */
 export async function GET(req: Request) {
   try {
@@ -39,7 +42,8 @@ export async function GET(req: Request) {
 
     const { data, error } = await q;
     if (error) throw error;
-    const apps = ((data ?? []) as AppRow[]).map(toPublicApp);
+    const visible = await excludeBannedSubmitters((data ?? []) as AppRow[]);
+    const apps = visible.map(toPublicApp);
     return NextResponse.json({ apps });
   } catch (e) {
     if (e instanceof Error && e.message.startsWith('Missing environment variable')) {

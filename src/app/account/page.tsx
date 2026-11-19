@@ -6,6 +6,7 @@ import { ErrorBox, Spinner } from "@/components/ui";
 import {
   apiErrorMessage,
   apiJson,
+  formatDate,
   initialsOf,
   LANGUAGES,
   PURPOSES,
@@ -361,25 +362,32 @@ export default function AccountPage() {
     );
   }
 
-  // ---- Session hai lekin account abhi approved nahi (approve ke baad reject ho gaya ho to) ----
+  // ---- Session hai lekin account abhi approved nahi (approve ke baad reject ya ban ho gaya ho to) ----
   if (account && account.name && account.status && account.status !== "approved") {
+    const banned = account.status === "banned";
     const rejected = account.status === "rejected";
     return (
       <div className="glass animate-pop-in mx-auto max-w-lg rounded-3xl border-amber-500/30 bg-amber-500/10 p-6 text-center">
         <p className="text-3xl" aria-hidden>
-          {rejected ? "🚫" : "⏳"}
+          {banned || rejected ? "🚫" : "⏳"}
         </p>
         <h1 className="mt-3 text-xl font-extrabold text-amber-200">
-          {rejected
-            ? "Aap ka account reject kar diya gaya hai"
-            : "Aap ka account review mein hai"}
+          {banned
+            ? "Aap ka account ban hai"
+            : rejected
+              ? "Aap ka account reject kar diya gaya hai"
+              : "Aap ka account review mein hai"}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-amber-200/80">
-          {rejected
-            ? "Owner ne aap ka account approve nahi kiya. Is email se dobara account nahi ban sakta."
-            : "Store ka owner 1 din ke andar aap ka account approve karega. Approve hote hi aap login kar sakenge."}
+          {banned
+            ? account.ban_until
+              ? `Aap ka account ${formatDate(account.ban_until)} tak ban hai. Muddat khatam hote hi account khud-bakhud chal padega.`
+              : "Aap ka account permanently ban hai. Is account se ab login, download ya release nahi ho sakta."
+            : rejected
+              ? "Owner ne aap ka account approve nahi kiya. Is email se dobara account nahi ban sakta."
+              : "Store ka owner 1 din ke andar aap ka account approve karega. Approve hote hi aap login kar sakenge."}
         </p>
-        {rejected && account.review_note ? (
+        {(banned || rejected) && account.review_note ? (
           <p className="mt-3 rounded-2xl bg-white/5 px-4 py-3 text-sm text-amber-200/80">
             Wajah: {account.review_note}
           </p>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
 import { sendVerificationCode } from '@/lib/email';
-import { getProfileReview } from '@/lib/auth';
+import { getProfileReview, denyIfBanned } from '@/lib/auth';
 import {
   codeExpiresAt,
   countRecentCodes,
@@ -19,7 +19,9 @@ export const dynamic = 'force-dynamic';
  * POST /api/auth/request-code { email }
  * Sends a 6-digit verification code by email. Returns { ok: true } only —
  * the code is NEVER in any API response.
- * - 403 when the email is burned or its account was rejected by the owner.
+ * - 403 when the email is burned, its account was rejected by the owner,
+ *   or it is ACTIVELY banned (ban ki muddat + wajah ke saath). An expired
+ *   ban is lifted automatically, so that email gets a code again.
  * - Existing pending/approved profiles may also request a code: that is how
  *   a returning user logs in (or checks a pending account's status).
  * - 429 after 5 codes per email per hour.
@@ -48,6 +50,9 @@ export async function POST(req: Request) {
     if (review?.status === 'rejected') {
       return err('Aap ka account reject kar diya gaya hai. Dobara account nahi ban sakta.', 403);
     }
+    // Ban hai to code nahi — muddat khatam ho gayi ho to ban khud utar jata hai.
+    const banMsg = await denyIfBanned(email);
+    if (banMsg) return err(banMsg, 403);
 
     await deleteExpiredCodes(db, email);
     const recent = await countRecentCodes(db, email);

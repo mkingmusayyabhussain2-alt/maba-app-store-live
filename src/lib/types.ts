@@ -8,14 +8,18 @@ export type Purpose = 'download' | 'upload' | 'both';
 export type AppStatus = 'pending' | 'approved' | 'rejected';
 
 /**
- * Account review status (migration 0002_account_review.sql).
+ * Account review status (migration 0002_account_review.sql + 0003_account_ban.sql).
  * - 'pending': naya account, owner ki approval ka wait kar raha hai.
  *   Aise account ko session nahi milta — login, release aur photo band hain.
  * - 'approved': account chal raha hai (purane accounts backfill se approved).
  * - 'rejected': owner ne reject kar diya — dobara code nahi milega.
+ * - 'banned': owner ne account ban kar diya — login, release, photo aur
+ *   profile update sab band hain; us ki apps public store se gayab ho jati
+ *   hain. Ban ki muddat khatam hote hi account khud-bakhud 'approved' ho
+ *   jata hai (ban_until null = permanent ban, kabhi khatam nahi hota).
  * Owner email (OWNER_EMAIL) ko review ki zaroorat nahi — hamesha approved.
  */
-export type AccountStatus = 'pending' | 'approved' | 'rejected';
+export type AccountStatus = 'pending' | 'approved' | 'rejected' | 'banned';
 
 export interface Profile {
   id: string;
@@ -30,6 +34,9 @@ export interface Profile {
   status: AccountStatus;
   review_note: string | null;
   reviewed_at: string | null;
+  /** Ban (migration 0003): kab ban hua + kab tak (null = permanent ban). */
+  banned_at: string | null;
+  ban_until: string | null;
 }
 
 export interface AppRow {

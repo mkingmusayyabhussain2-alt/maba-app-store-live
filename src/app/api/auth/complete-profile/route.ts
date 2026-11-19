@@ -4,6 +4,7 @@ import {
   assertEmailUsable,
   clearVerifyCookie,
   createSession,
+  denyIfBanned,
   getProfileReview,
   getVerifiedEmail,
   isOwnerEmail,
@@ -27,6 +28,9 @@ export const dynamic = 'force-dynamic';
  * - RETURNING email with a 'pending' profile: { ok: true, status: 'pending' }
  *   with NO session — the UI shows the pending notice again.
  * - RETURNING email with a 'rejected' profile: 403.
+ * - RETURNING email with a 'banned' profile: 403 with the ban message
+ *   (muddat + wajah). Ban ki muddat khatam ho gayi ho to ban khud utar
+ *   jata hai aur user approved ki tarah login kar leta hai.
  * Returns { ok: true, status, account }.
  */
 export async function POST(req: Request) {
@@ -66,6 +70,12 @@ export async function POST(req: Request) {
       }
       if (existing.status === 'rejected' && !owner) {
         return err('Aap ka account reject kar diya gaya hai. Dobara account nahi ban sakta.', 403);
+      }
+      if (existing.status === 'banned' && !owner) {
+        // Ban hai to login nahi — muddat khatam ho to ban khud utar jata hai
+        // aur neeche approved wala rasta chal padta hai.
+        const banMsg = await denyIfBanned(email);
+        if (banMsg) return err(banMsg, 403);
       }
       if (existing.status === 'pending' && !owner) {
         // Still waiting for review — no session yet.

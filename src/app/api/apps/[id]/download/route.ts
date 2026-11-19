@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient, getSupabaseUrl } from '@/lib/supabase';
+import { isSubmitterActivelyBanned } from '@/lib/auth';
 import { err, serverError } from '@/lib/http';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +9,7 @@ const SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
 
 /**
  * GET /api/apps/[id]/download — only APPROVED apps.
+ * A banned submitter's app cannot be downloaded (404).
  * Increments the download counter, then 302-redirects to the APK in
  * Supabase Storage (a 1-hour signed URL, since the `apks` bucket is private).
  * If apk_url is already a full URL, it is used directly.
@@ -28,7 +30,10 @@ export async function GET(
     if (error) throw error;
     if (!data) return err('App nahi mili.', 404);
 
-    const app = data as { apk_url: string | null; downloads: number | null };
+    const app = data as { apk_url: string | null; downloads: number | null; submitter_email: string | null };
+    if (await isSubmitterActivelyBanned(app.submitter_email)) {
+      return err('App nahi mili.', 404);
+    }
     if (!app.apk_url) return err('Is app ki APK file maujood nahi.', 404);
 
     // Count the download (best-effort: a counter failure must not block the file).

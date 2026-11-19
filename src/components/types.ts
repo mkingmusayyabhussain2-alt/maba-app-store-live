@@ -18,9 +18,12 @@ export type Account = {
   purpose: string | null;
   language: string | null;
   avatar_url: string | null;
-  /** Account review status: 'pending' | 'approved' | 'rejected' (migration 0002). */
+  /** Account review status: 'pending' | 'approved' | 'rejected' | 'banned' (migrations 0002 + 0003). */
   status: string | null;
   review_note: string | null;
+  /** Ban (migration 0003): kab ban hua + kab tak (null = permanent ban). */
+  banned_at: string | null;
+  ban_until: string | null;
 };
 
 export type MeResponse = {
@@ -31,7 +34,7 @@ export type MeResponse = {
 /** POST /api/auth/complete-profile ka jawab: status batata hai account chala ya review mein gaya. */
 export type CompleteProfileResponse = {
   ok: boolean;
-  status?: "pending" | "approved" | "rejected";
+  status?: "pending" | "approved" | "rejected" | "banned";
   account?: Account | null;
 };
 

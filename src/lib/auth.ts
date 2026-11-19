@@ -18,7 +18,7 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { getServiceClient } from './supabase';
-import type { AccountStatus } from './types';
+import type { AccountStatus, AppRow } from './types';
 
 export const SESSION_COOKIE = 'maba_session';
 export const VERIFY_COOKIE = 'maba_verify';
@@ -150,6 +150,11 @@ export interface ProfileReview {
   id: string;
   status: AccountStatus;
   retired_at: string | null;
+  /** Ban (migration 0003): kab ban hua + kab tak (null = permanent ban). */
+  banned_at: string | null;
+  ban_until: string | null;
+  /** Ban/reject ki wajah (review_note column reuse hota hai). */
+  review_note: string | null;
 }
 
 /** Fetch an email's profile review state (null when no profile exists). */
@@ -157,22 +162,160 @@ export async function getProfileReview(email: string): Promise<ProfileReview | n
   const db = getServiceClient();
   const { data } = await db
     .from('profiles')
-    .select('id, status, retired_at')
+    .select('id, status, retired_at, banned_at, ban_until, review_note')
     .eq('email', email)
     .maybeSingle();
   return (data as ProfileReview | null) ?? null;
 }
 
 /**
+ * True when a timed ban has run out. ban_until null means a PERMANENT ban —
+ * it never expires on its own.
+ */
+export function isBanExpired(banUntil: string | null | undefined): boolean {
+  if (!banUntil) return false;
+  const t = new Date(banUntil).getTime();
+  return Number.isFinite(t) && t <= Date.now();
+}
+
+/** The DB update that lifts an expired ban (back to 'approved', ban fields cleared). */
+function liftBanUpdate() {
+  return {
+    status: 'approved' as const,
+    banned_at: null,
+    ban_until: null,
+    reviewed_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Lift ONE account's expired ban. Returns true when a row was actually
+ * lifted. Permanent bans (ban_until null) are never lifted here.
+ */
+export async function liftExpiredBan(email: string): Promise<boolean> {
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from('profiles')
+    .update(liftBanUpdate())
+    .eq('email', email)
+    .eq('status', 'banned')
+    .not('ban_until', 'is', null)
+    .lte('ban_until', new Date().toISOString())
+    .select('id');
+  if (error) throw error;
+  return (data ?? []).length > 0;
+}
+
+/** Lift EVERY expired ban in one query (used by public listings). */
+export async function liftExpiredBans(): Promise<void> {
+  const db = getServiceClient();
+  const { error } = await db
+    .from('profiles')
+    .update(liftBanUpdate())
+    .eq('status', 'banned')
+    .not('ban_until', 'is', null)
+    .lte('ban_until', new Date().toISOString());
+  if (error) throw error;
+}
+
+/** Roman Urdu message for an ACTIVE ban — until date or permanent + note. */
+export function banMessage(review: {
+  ban_until: string | null;
+  review_note: string | null;
+}): string {
+  const base = review.ban_until
+    ? `Aap ka account ${formatBanUntil(review.ban_until)} tak ban hai.`
+    : 'Aap ka account permanently ban hai.';
+  const note = review.review_note ? ` Wajah: ${review.review_note}` : '';
+  return `${base}${note} Owner se rabta karen.`;
+}
+
+/** "12 Nov 2026, 09:30" jaisi readable date — ban ki muddat dikhane ke liye. */
+export function formatBanUntil(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
+ * The ban message when this email is ACTIVELY banned, or null when it is
+ * not banned — or its ban just expired (the ban is lifted lazily, so the
+ * account works again without any owner action).
+ * Routes use this to give a banned user a clear 403 instead of the generic
+ * "review mein hai" message.
+ */
+export async function denyIfBanned(email: string): Promise<string | null> {
+  const review = await getProfileReview(email);
+  if (!review || review.status !== 'banned') return null;
+  if (isBanExpired(review.ban_until)) {
+    await liftExpiredBan(email);
+    return null;
+  }
+  return banMessage(review);
+}
+
+/** True when this email's apps must stay hidden from the public store. */
+export async function isSubmitterActivelyBanned(
+  email: string | null | undefined,
+): Promise<boolean> {
+  if (!email) return false;
+  return (await denyIfBanned(email)) !== null;
+}
+
+/**
+ * Drop every app whose submitter is ACTIVELY banned (expired bans are
+ * lifted first, so an unblocked user's apps come back automatically).
+ * Used by the public store listing — detail/download routes check the
+ * single submitter with isSubmitterActivelyBanned instead.
+ */
+export async function excludeBannedSubmitters(apps: AppRow[]): Promise<AppRow[]> {
+  const emails = [
+    ...new Set(
+      apps
+        .map((a) => a.submitter_email)
+        .filter((e): e is string => Boolean(e)),
+    ),
+  ];
+  if (emails.length === 0) return apps;
+  await liftExpiredBans();
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from('profiles')
+    .select('email')
+    .in('email', emails)
+    .eq('status', 'banned');
+  if (error) throw error;
+  const banned = new Set(((data ?? []) as { email: string }[]).map((r) => r.email));
+  if (banned.size === 0) return apps;
+  return apps.filter((a) => !a.submitter_email || !banned.has(a.submitter_email));
+}
+
+/**
  * True when this email may use the store: the owner is always approved, and
- * any other email needs a profile with status 'approved'. Pending and
- * rejected accounts get no session and no authed actions — even if an old
- * session cookie is still lying around (e.g. approved phir reject ho gaya).
+ * any other email needs a profile with status 'approved'. Pending, rejected
+ * and ACTIVELY banned accounts get no session and no authed actions — even
+ * if an old session cookie is still lying around (e.g. approved phir reject
+ * ya ban ho gaya). An EXPIRED ban is lifted lazily here, so the account is
+ * approved again without the owner doing anything.
  */
 export async function isAccountApproved(email: string): Promise<boolean> {
   if (isOwnerEmail(email)) return true;
   const review = await getProfileReview(email);
-  return review?.status === 'approved';
+  if (!review) return false;
+  if (review.status === 'banned') {
+    if (isBanExpired(review.ban_until)) {
+      await liftExpiredBan(email);
+      return true;
+    }
+    return false;
+  }
+  return review.status === 'approved';
 }
 
 /** True when the session email is the store owner (from OWNER_EMAIL env). */
