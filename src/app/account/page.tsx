@@ -47,6 +47,8 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // Naya account review mein gaya ho to ye notice dikhta hai (session nahi milta).
+  const [pendingNotice, setPendingNotice] = useState(false);
 
   // Details form
   const [name, setName] = useState("");
@@ -186,6 +188,16 @@ export default function AccountPage() {
         throw new Error(
           await apiErrorMessage(res, "Profile save nahi ho saka."),
         );
+      const data = (await res.json()) as {
+        status?: string;
+        account?: unknown;
+      };
+      if (data.status === "pending") {
+        // Account review mein chala gaya — session nahi mila.
+        setPendingNotice(true);
+        setInfo(null);
+        return;
+      }
       setInfo("Account ban gaya — khush aamdeed!");
       await loadMe();
     } catch (err) {
@@ -313,6 +325,65 @@ export default function AccountPage() {
           {bannedEmail} se ab dobara account nahi ban sakta. Agar ye ghalti se
           hua hai to store ke owner se rabta karo.
         </p>
+        <Link
+          href="/"
+          className="btn-install mt-6 inline-flex rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-bold text-emerald-950"
+        >
+          Store par jao
+        </Link>
+      </div>
+    );
+  }
+
+  // ---- Account review mein hai (naya account, abhi approve nahi hua) ----
+  if (pendingNotice) {
+    return (
+      <div className="glass animate-pop-in mx-auto max-w-lg rounded-3xl border-amber-500/30 bg-amber-500/10 p-6 text-center">
+        <p className="text-3xl" aria-hidden>
+          ⏳
+        </p>
+        <h1 className="mt-3 text-xl font-extrabold text-amber-200">
+          Aap ka account review mein hai
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-amber-200/80">
+          Aap ki details save ho gayi hain. Store ka owner 1 din ke andar
+          aap ka account approve karega — approve hote hi aap isi page se
+          code se login kar sakenge. Tab tak app download ya release nahi kar
+          sakte.
+        </p>
+        <Link
+          href="/"
+          className="btn-install mt-6 inline-flex rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-bold text-emerald-950"
+        >
+          Store par jao
+        </Link>
+      </div>
+    );
+  }
+
+  // ---- Session hai lekin account abhi approved nahi (approve ke baad reject ho gaya ho to) ----
+  if (account && account.name && account.status && account.status !== "approved") {
+    const rejected = account.status === "rejected";
+    return (
+      <div className="glass animate-pop-in mx-auto max-w-lg rounded-3xl border-amber-500/30 bg-amber-500/10 p-6 text-center">
+        <p className="text-3xl" aria-hidden>
+          {rejected ? "🚫" : "⏳"}
+        </p>
+        <h1 className="mt-3 text-xl font-extrabold text-amber-200">
+          {rejected
+            ? "Aap ka account reject kar diya gaya hai"
+            : "Aap ka account review mein hai"}
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-amber-200/80">
+          {rejected
+            ? "Owner ne aap ka account approve nahi kiya. Is email se dobara account nahi ban sakta."
+            : "Store ka owner 1 din ke andar aap ka account approve karega. Approve hote hi aap login kar sakenge."}
+        </p>
+        {rejected && account.review_note ? (
+          <p className="mt-3 rounded-2xl bg-white/5 px-4 py-3 text-sm text-amber-200/80">
+            Wajah: {account.review_note}
+          </p>
+        ) : null}
         <Link
           href="/"
           className="btn-install mt-6 inline-flex rounded-full bg-emerald-500 px-6 py-2.5 text-sm font-bold text-emerald-950"

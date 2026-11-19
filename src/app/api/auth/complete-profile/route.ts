@@ -4,7 +4,9 @@ import {
   assertEmailUsable,
   clearVerifyCookie,
   createSession,
+  getProfileReview,
   getVerifiedEmail,
+  isOwnerEmail,
   setSessionCookie,
 } from '@/lib/auth';
 import { PURPOSES, type Profile, type Purpose } from '@/lib/types';
@@ -14,9 +16,18 @@ export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/auth/complete-profile { name, place, purpose, language }
- * Requires the `maba_verify` cookie (email just proved by code). Re-checks
- * the one-email-one-account rule, inserts the profile, creates a session,
- * clears the verify cookie. Returns { ok: true, account }.
+ * Requires the `maba_verify` cookie (email just proved by code).
+ *
+ * Account review (migration 0002):
+ * - NEW email: profile is created with status 'pending' — NO session — and
+ *   the UI shows "account review mein hai, 1 din mein approve hoga". The
+ *   owner email is created 'approved' and gets a session as before.
+ * - RETURNING email with an 'approved' profile: a session is issued, so an
+ *   approved user can log back in with a fresh code.
+ * - RETURNING email with a 'pending' profile: { ok: true, status: 'pending' }
+ *   with NO session — the UI shows the pending notice again.
+ * - RETURNING email with a 'rejected' profile: 403.
+ * Returns { ok: true, status, account }.
  */
 export async function POST(req: Request) {
   try {
@@ -44,10 +55,54 @@ export async function POST(req: Request) {
       return err('Purpose theek nahi hai.', 400);
     }
 
+    const db = getServiceClient();
+    const owner = isOwnerEmail(email);
+
+    // ---- Returning user: profile already exists ----
+    const existing = await getProfileReview(email);
+    if (existing) {
+      if (existing.retired_at) {
+        return err('Is email par dobara account nahi ban sakta.', 403);
+      }
+      if (existing.status === 'rejected' && !owner) {
+        return err('Aap ka account reject kar diya gaya hai. Dobara account nahi ban sakta.', 403);
+      }
+      if (existing.status === 'pending' && !owner) {
+        // Still waiting for review — no session yet.
+        const { data: account } = await db
+          .from('profiles')
+          .select('*')
+          .eq('email', email)
+          .maybeSingle();
+        const res = NextResponse.json({
+          ok: true,
+          status: 'pending',
+          account: (account as Profile | null) ?? null,
+        });
+        clearVerifyCookie(res);
+        return res;
+      }
+      // Approved (or owner): log back in with a fresh session.
+      const { data: account } = await db
+        .from('profiles')
+        .select('*')
+        .eq('email', email)
+        .maybeSingle();
+      const token = await createSession(email);
+      const res = NextResponse.json({
+        ok: true,
+        status: 'approved',
+        account: (account as Profile | null) ?? null,
+      });
+      setSessionCookie(res, token);
+      clearVerifyCookie(res);
+      return res;
+    }
+
+    // ---- New user: create the profile ----
     const unusable = await assertEmailUsable(email);
     if (unusable) return err(unusable, 403);
 
-    const db = getServiceClient();
     const { data, error } = await db
       .from('profiles')
       .insert({
@@ -56,6 +111,7 @@ export async function POST(req: Request) {
         place: place.slice(0, 100) || null,
         purpose,
         language,
+        status: owner ? 'approved' : 'pending',
       })
       .select('*')
       .single();
@@ -67,8 +123,23 @@ export async function POST(req: Request) {
       throw error;
     }
 
+    if (!owner) {
+      // New account goes to review — no session until the owner approves.
+      const res = NextResponse.json({
+        ok: true,
+        status: 'pending',
+        account: data as Profile,
+      });
+      clearVerifyCookie(res);
+      return res;
+    }
+
     const token = await createSession(email);
-    const res = NextResponse.json({ ok: true, account: data as Profile });
+    const res = NextResponse.json({
+      ok: true,
+      status: 'approved',
+      account: data as Profile,
+    });
     setSessionCookie(res, token);
     clearVerifyCookie(res);
     return res;

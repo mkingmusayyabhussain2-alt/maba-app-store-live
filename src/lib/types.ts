@@ -7,6 +7,16 @@
 export type Purpose = 'download' | 'upload' | 'both';
 export type AppStatus = 'pending' | 'approved' | 'rejected';
 
+/**
+ * Account review status (migration 0002_account_review.sql).
+ * - 'pending': naya account, owner ki approval ka wait kar raha hai.
+ *   Aise account ko session nahi milta — login, release aur photo band hain.
+ * - 'approved': account chal raha hai (purane accounts backfill se approved).
+ * - 'rejected': owner ne reject kar diya — dobara code nahi milega.
+ * Owner email (OWNER_EMAIL) ko review ki zaroorat nahi — hamesha approved.
+ */
+export type AccountStatus = 'pending' | 'approved' | 'rejected';
+
 export interface Profile {
   id: string;
   email: string;
@@ -17,6 +27,9 @@ export interface Profile {
   avatar_url: string | null;
   created_at: string;
   retired_at: string | null;
+  status: AccountStatus;
+  review_note: string | null;
+  reviewed_at: string | null;
 }
 
 export interface AppRow {

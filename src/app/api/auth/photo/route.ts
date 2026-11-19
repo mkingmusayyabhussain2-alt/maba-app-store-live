@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient, publicFileUrl, storagePathFromPublicUrl } from '@/lib/supabase';
-import { getSessionEmail } from '@/lib/auth';
+import { getSessionEmail, isAccountApproved } from '@/lib/auth';
 import type { Profile } from '@/lib/types';
 import { err, serverError } from '@/lib/http';
 
@@ -17,6 +17,9 @@ export async function POST(req: Request) {
   try {
     const email = await getSessionEmail();
     if (!email) return err('Login karen.', 401);
+    if (!(await isAccountApproved(email))) {
+      return err('Aap ka account abhi review mein hai. Approve hone ke baad photo laga sakenge.', 403);
+    }
 
     const form = await req.formData().catch(() => null);
     const photo = form?.get('photo');
@@ -80,6 +83,9 @@ export async function DELETE() {
   try {
     const email = await getSessionEmail();
     if (!email) return err('Login karen.', 401);
+    if (!(await isAccountApproved(email))) {
+      return err('Aap ka account abhi review mein hai.', 403);
+    }
 
     const db = getServiceClient();
     const { data: profile } = await db

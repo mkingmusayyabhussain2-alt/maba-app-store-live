@@ -26,6 +26,7 @@ backend, and **Gmail SMTP (nodemailer)** for verification emails.
 - **Public store** — sirf approved apps dikhti hain; search + category filter; newest-first ("Nayi apps"), downloads ke hisaab se sort UI mein hota hai ("Sab se zyada download").
 - **App detail + download** — download counter barhta hai, phir APK Supabase Storage se signed URL par redirect hoti hai (APK bucket private hai).
 - **Account (email code se)** — email par 6-digit code, phir profile (naam, jagah, purpose, language). **Ek email, ek account, hamesha ke liye.**
+- **Account review** — naya account banate hi `pending` mein jata hai aur owner ki approval ka wait karta hai (review website ya `/admin` se). **Pending account ko session nahi milta**: login, app release aur photo upload band rehte hain jab tak owner approve na kare (1 din ke andar). Reject hone par us email ko dobara code nahi milta. Purane accounts (migration 0002 se pehle ke) sab `approved` hain. Owner email (`OWNER_EMAIL`) ko review ki zaroorat nahi — hamesha approved. Wapas login: approved account dobara code se login kar sakta hai (request-code → verify-code → complete-profile session deta hai).
 - **Permanent Log Out** — account hamesha ke liye band: email `burned_emails` mein jati hai, profile retired mark hoti hai (row rakhi jati hai taake dobara register na ho sake), sessions khatam.
 - **Release flow** — login ke baad APK + icon upload, proof email/phone; app `pending` mein jati hai.
 - **Owner review** — sirf `OWNER_EMAIL` wali email `/api/admin/releases` dekh sakti hai aur approve/reject kar sakti hai. Approve hote hi app store mein public ho jati hai.
@@ -41,15 +42,15 @@ responses mein nahi aate.
 | `GET /api/apps?search=&category=` | Public | Sirf `approved` apps, newest first. `{ apps: [...] }` (proof/submitter contact nahi hota) |
 | `GET /api/apps/[id]` | Public | Approved app ki detail. Pending/rejected par 404 |
 | `GET /api/apps/[id]/download` | Public | Sirf approved. Downloads +1, phir APK par 302 redirect (private bucket ke liye 1-hour signed URL) |
-| `POST /api/auth/request-code` `{email}` | — | 6-digit code email karta hai. Burned/existing email par 403; 1 ghante mein 5 se zyada codes par 429. `{ ok: true }` |
+| `POST /api/auth/request-code` `{email}` | — | 6-digit code email karta hai. Burned ya rejected email par 403; pending/approved account bhi code mangwa sakta hai (dobara login ke liye). 1 ghante mein 5 se zyada codes par 429. `{ ok: true }` |
 | `POST /api/auth/verify-code` `{email, code}` | — | Ghalat code par attempts +1, 400. 5 ghalat koshishon ke baad code lock — naya code chahiye. Sahi code par `maba_verify` cookie (15 min). `{ ok: true }` |
-| `POST /api/auth/complete-profile` `{name, place, purpose, language}` | Verify cookie | Profile banata hai, session cookie deta hai, verify cookie clear. `{ ok: true, account }` |
-| `GET /api/auth/me[?email=]` | Session (optional) | `{ account, bannedEmail }`. `?email=` sirf us email ka burned status check karta hai (logout screen ke liye) |
-| `POST /api/auth/update-profile` `{name, place, purpose, language}` | Session | Profile update. `{ ok: true, account }` |
-| `POST /api/auth/photo` (FormData `photo`) | Session | Image (PNG/JPG/WEBP/GIF) `avatars` bucket mein, purani photo delete. `{ avatar_url }` |
-| `DELETE /api/auth/photo` | Session | Photo + `avatar_url` clear. `{ ok: true }` |
+| `POST /api/auth/complete-profile` `{name, place, purpose, language}` | Verify cookie | Naya account: profile `pending` banata hai, session NAHI deta — `{ ok: true, status: 'pending', account }`. Owner: `approved` + session. Dobara login (approved profile): session deta hai — `{ ok: true, status: 'approved', account }`. Pending profile dobara aaye to `{ status: 'pending' }`, session nahi. Rejected par 403. |
+| `GET /api/auth/me[?email=]` | Session (optional) | `{ account, bannedEmail }`. Account mein `status` aur `review_note` bhi hote hain. `?email=` sirf us email ka burned status check karta hai (logout screen ke liye) |
+| `POST /api/auth/update-profile` `{name, place, purpose, language}` | Session (approved only) | Profile update. Pending/rejected account par 403 ("account abhi review mein hai"). `{ ok: true, account }` |
+| `POST /api/auth/photo` (FormData `photo`) | Session (approved only) | Image (PNG/JPG/WEBP/GIF) `avatars` bucket mein, purani photo delete. Pending/rejected account par 403. `{ avatar_url }` |
+| `DELETE /api/auth/photo` | Session (approved only) | Photo + `avatar_url` clear. Pending/rejected account par 403. `{ ok: true }` |
 | `POST /api/auth/logout-permanent` `{email}` | Session + email match | Email hamesha ke liye burn, profile retired, sessions + codes delete, cookies clear. `{ ok: true, banned: true }` |
-| `POST /api/release` (FormData) | Session | APK (required, `.apk`) + icon (optional image) upload, app `pending`. `{ ok: true, id, status: 'pending' }` |
+| `POST /api/release` (FormData) | Session (approved only) | APK (required, `.apk`) + icon (optional image) upload, app `pending`. Pending/rejected account par 403. `{ ok: true, id, status: 'pending' }` |
 | `GET /api/admin/releases` | Owner only | Sab releases (pending/approved/rejected), newest first. `{ releases: [...] }` |
 | `POST /api/admin/releases/[id]/approve` | Owner only | Status `approved`. `{ ok: true, app }` |
 | `POST /api/admin/releases/[id]/reject` `{note?}` | Owner only | Status `rejected` (+ optional note). `{ ok: true, app }` |
@@ -65,6 +66,8 @@ responses mein nahi aate.
 ## Database (Supabase)
 
 Migration: `supabase/migrations/0001_init.sql` — re-runnable (IF NOT EXISTS / ON CONFLICT guards).
+
+Migration `0002_account_review.sql` — account review ke liye: `profiles` mein `status` (`pending`/`approved`/`rejected`, default `pending`), `review_note` aur `reviewed_at` add karta hai, aur migration chalte waqt jitne profiles hain un sab ko `approved` kar deta hai (wo review se pehle ke accounts hain). **Sirf ek dafa chalana hai** — dobara chalane se naye pending accounts bhi approve ho jayenge. Index: `profiles(status, created_at desc)`.
 
 | Table | Main columns |
 |---|---|

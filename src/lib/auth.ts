@@ -10,12 +10,15 @@
  *
  * Permanent rule: an email that is in `burned_emails` OR has ANY row in
  * `profiles` (active or retired) can never register again. `assertEmailUsable`
- * enforces this at request-code time AND at complete-profile time.
+ * enforces this at complete-profile time for brand-new registrations.
+ * `request-code` has its own check: burned and rejected emails get no code,
+ * but pending/approved accounts may request one (returning login).
  */
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { getServiceClient } from './supabase';
+import type { AccountStatus } from './types';
 
 export const SESSION_COOKIE = 'maba_session';
 export const VERIFY_COOKIE = 'maba_verify';
@@ -141,6 +144,35 @@ export async function assertEmailUsable(email: string): Promise<string | null> {
     return 'Is email par dobara account nahi ban sakta.';
   }
   return null;
+}
+
+export interface ProfileReview {
+  id: string;
+  status: AccountStatus;
+  retired_at: string | null;
+}
+
+/** Fetch an email's profile review state (null when no profile exists). */
+export async function getProfileReview(email: string): Promise<ProfileReview | null> {
+  const db = getServiceClient();
+  const { data } = await db
+    .from('profiles')
+    .select('id, status, retired_at')
+    .eq('email', email)
+    .maybeSingle();
+  return (data as ProfileReview | null) ?? null;
+}
+
+/**
+ * True when this email may use the store: the owner is always approved, and
+ * any other email needs a profile with status 'approved'. Pending and
+ * rejected accounts get no session and no authed actions — even if an old
+ * session cookie is still lying around (e.g. approved phir reject ho gaya).
+ */
+export async function isAccountApproved(email: string): Promise<boolean> {
+  if (isOwnerEmail(email)) return true;
+  const review = await getProfileReview(email);
+  return review?.status === 'approved';
 }
 
 /** True when the session email is the store owner (from OWNER_EMAIL env). */

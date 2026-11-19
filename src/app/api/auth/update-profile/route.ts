@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceClient } from '@/lib/supabase';
-import { getSessionEmail } from '@/lib/auth';
+import { getSessionEmail, isAccountApproved } from '@/lib/auth';
 import { PURPOSES, type Profile, type Purpose } from '@/lib/types';
 import { err, serverError } from '@/lib/http';
 
@@ -11,6 +11,9 @@ export async function POST(req: Request) {
   try {
     const email = await getSessionEmail();
     if (!email) return err('Login karen.', 401);
+    if (!(await isAccountApproved(email))) {
+      return err('Aap ka account abhi review mein hai. Approve hone ke baad profile edit kar sakenge.', 403);
+    }
 
     const body = (await req.json().catch(() => null)) as {
       name?: unknown;
